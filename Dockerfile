@@ -1,53 +1,88 @@
-# Use the official ROS Noetic base image
-FROM ros:noetic-ros-core
+ARG VERSION=11
+FROM gazebo:libgazebo${VERSION}-xenial
 
-# Install necessary packages
-RUN apt-get update && apt-get install -y \
-    gazebo11 \
-    ros-noetic-gazebo-ros-pkgs \
-    ros-noetic-gazebo-ros-control \
+# add ROS sources
+RUN apt update && apt install -y openssh-server x11-apps mesa-utils vim llvm-dev sudo autoconf
+RUN mkdir /var/run/sshd
+RUN echo 'root:buttercups' | chpasswd
+RUN sed -i 's/PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+RUN grep "^X11UseLocalhost" /etc/ssh/sshd_config || echo "X11UseLocalhost no" >> /etc/ssh/sshd_config
+
+# SSH login fix. Otherwise user is kicked off after login
+RUN sed 's@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g' -i /etc/pam.d/sshd
+
+#Rebuild MESA with llvmpipe (from https://turbovnc.org/Documentation/Mesa)
+RUN wget ftp://ftp.freedesktop.org/pub/mesa/mesa-18.3.1.tar.gz;\
+    tar -zxvf mesa-18.3.1.tar.gz;\
+    rm mesa-18.3.1.tar.gz;\
+    cd mesa-18.3.1;\
+    autoreconf -fiv;\
+    ./configure --enable-glx=gallium-xlib --disable-dri --disable-egl --disable-gbm --with-gallium-drivers=swrast --prefix=$HOME/mesa;\
+    make install
+
+#set up locales
+RUN apt install -y locales screen
+RUN locale-gen en_GB.UTF-8 && locale-gen en_US.UTF-8
+
+#INSTALL ADDITIONAL ROS PACKAGES BELOW HERE
+
+#clear apt caches to reduce image size
+RUN rm -rf /var/lib/apt/lists/*
+
+#configure system to use new mesa
+RUN cd ~ && echo "export LD_LIBRARY_PATH=/root/mesa/lib" > opengl.sh
+
+ENV NOTVISIBLE "in users profile"
+RUN echo "export VISIBLE=now" >> /etc/profile
+
+# Start and expose the SSH service
+EXPOSE 22
+RUN service ssh restart
+
+RUN apt update && apt install -y \
     curl \
-    git \
-    mercurial \
-    cmake \
-    build-essential \
+    sudo
+
+RUN apt update && apt install -y \
+    libsdformat4 \
+    gazebo${VERSION} \
+    gazebo${VERSION}-plugin-base \
+    libignition-math2 \
+    libignition-math2-dev \
+    libsdformat4-dev \
+    libgazebo${VERSION} \
+    libgazebo${VERSION}-dev
+
+RUN apt update && apt install -y \
     libjansson-dev \
+    nodejs \
+    npm \
+    nodejs-legacy \
     libboost-dev \
     imagemagick \
     libtinyxml-dev \
-    && rm -rf /var/lib/apt/lists/*
+    mercurial \
+    cmake \
+    build-essential
 
-# Install nvm, node, and npm
-RUN curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.35.3/install.sh | bash && \
-    export NVM_DIR="$HOME/.nvm" && \
-    [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh" && \
-    nvm install 8 && \
-    nvm use 8 && \
-    nvm alias default 8 && \
-    ln -s $NVM_DIR/versions/node/v8/bin/node /usr/bin/node && \
-    ln -s $NVM_DIR/versions/node/v8/bin/npm /usr/bin/npm
+# Upgrade node
+RUN curl -sL https://deb.nodesource.com/setup_11.x | sudo -E bash -
+RUN sudo apt-get install -y nodejs
 
-# Ensure nvm is available in future RUN commands
-ENV NVM_DIR /root/.nvm
-ENV NODE_VERSION 8
-ENV PATH $NVM_DIR/versions/node/v$NODE_VERSION/bin:$PATH
 
-# Install node and npm using nvm
-RUN /bin/bash -c "source $NVM_DIR/nvm.sh && nvm install $NODE_VERSION && nvm use $NODE_VERSION && nvm alias default $NODE_VERSION"
 
-# Install gzweb
-RUN git clone https://github.com/osrf/gzweb.git /gzweb 
-WORKDIR /gzweb
-RUN git checkout gzweb_1.4.1 
-# Ensure nvm is set up before running npm install
-RUN /bin/bash -c "source /usr/share/gazebo/setup.sh && npm install"
+# clone gzweb
+RUN cd ~; \
+    hg clone https://bitbucket.org/osrf/gzweb; \
+    cd ~/gzweb; \
+    hg up gzweb_1.4.0; \
+    source /usr/share/gazebo/setup.sh; \
+    npm run deploy --- -m
 
-WORKDIR /
-# Set environment variables
-ENV GAZEBO_MODEL_PATH=/usr/share/gazebo-11/models
+# setup environment
+EXPOSE 8080
+EXPOSE 7681
 
-# Copy the entrypoint script
-COPY gzweb_entrypoint.sh /gzweb_entrypoint.sh
-
-# Make the entrypoint script executable
-RUN chmod +x /gzweb_entrypoint.sh
+# run gzserver and gzweb
+COPY start_script.sh start_script.sh
+CMD ./start_script.sh
