@@ -50,7 +50,18 @@ RUN wget ftp://ftp.freedesktop.org/pub/mesa/mesa-18.3.1.tar.gz && \
     rm mesa-18.3.1.tar.gz && \
     cd mesa-18.3.1 && \
     autoreconf -fiv && \
-    ./configure --enable-glx=gallium-xlib --disable-dri --disable-egl --disable-gbm --with-gallium-drivers=swrast --enable-osmesa --disable-driglx-direct --with-dri-drivers= --with-platforms=x11 --prefix=$HOME/mesa    make -j$(nproc) && \
+    ./configure \
+        --enable-glx=gallium-xlib \
+        --disable-dri \
+        --disable-egl \
+        --disable-gbm \
+        --with-gallium-drivers=swrast \
+        --enable-osmesa \
+        --disable-driglx-direct \
+        --with-dri-drivers= \
+        --with-platforms=x11 \
+        --prefix=$HOME/mesa && \
+    make -j$(nproc) && \
     make install
 
 # Set up locales
